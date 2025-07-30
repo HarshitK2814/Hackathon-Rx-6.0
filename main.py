@@ -92,12 +92,18 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
     )
     print(f"INFO: [Step 3/5] Vector index created in {time.time() - start_time:.2f} seconds.")
 
-    # 4. Process Each Question
+    # 4. Process Each Question (OPTIMIZED)
     final_answers = []
-    print("INFO: [Step 4/5] Starting to process questions...")
+    print("INFO: [Step 4/5] Creating embeddings for all questions (batch processing)...")
+    all_question_embeddings = embedding_model.encode(questions).tolist()
+    print("INFO: [Step 4/5] Question embeddings created. Starting to process each question...")
+
     for i, question in enumerate(questions):
         print(f"INFO: - Processing question {i+1}/{len(questions)}: '{question[:40]}...'")
-        question_embedding = embedding_model.encode([question]).tolist()
+        
+        # Use the pre-calculated embedding for the current question
+        question_embedding = [all_question_embeddings[i]]
+        
         results = collection.query(
             query_embeddings=question_embedding,
             n_results=3
