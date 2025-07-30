@@ -5,27 +5,34 @@ import io
 import google.generativeai as genai
 import chromadb
 
+# Add a print statement right at the beginning
+print("INFO: Python script starting...")
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 from sentence_transformers import SentenceTransformer
 
+print("INFO: Imports successful.")
 
 # --- Configuration ---
 try:
+    print("INFO: Configuring Generative AI...")
     genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
+    print("INFO: Generative AI configured successfully.")
 except KeyError:
     print("FATAL: GOOGLE_API_KEY environment variable not set.")
     exit(1)
 
 
 # --- Load Models ---
-# Load the embedding model once when the application starts
-# This is efficient as it doesn't reload for every request.
+print("INFO: Loading embedding model (this may take a while)...")
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+print("INFO: Embedding model loaded successfully.")
 
-# Load the generative model
+print("INFO: Loading LLM...")
 llm = genai.GenerativeModel('gemini-1.5-flash-latest')
+print("INFO: LLM loaded successfully.")
 
 
 # --- Pydantic Models ---
