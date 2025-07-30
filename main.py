@@ -13,7 +13,7 @@ from sentence_transformers import SentenceTransformer
 
 # --- Configuration ---
 try:
-    genai.configure(api_key=os.environ['AIzaSyAFphaaJQwsKkZXl0A92stoM3O36Rr_fmw'])
+    genai.configure(api_key=os.environ['GOOGLE_API_KEY'])
 except KeyError:
     print("FATAL: GOOGLE_API_KEY environment variable not set.")
     exit(1)
