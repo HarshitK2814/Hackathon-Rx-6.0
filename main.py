@@ -4,6 +4,7 @@ import pypdf
 import io
 import google.generativeai as genai
 import chromadb
+import time
 
 # Add a print statement right at the beginning
 print("INFO: Python script starting...")
@@ -57,49 +58,54 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
     """
     Downloads a PDF, builds a vector index, and answers questions using RAG.
     """
+    print("INFO: Request received. Starting RAG process...")
+    start_time = time.time()
+
     # 1. Download and Extract Text from PDF
     try:
+        print("INFO: [Step 1/5] Downloading document...")
         response = requests.get(document_url)
         response.raise_for_status()
         with io.BytesIO(response.content) as pdf_file:
             reader = pypdf.PdfReader(pdf_file)
             full_document_text = "".join(page.extract_text() or "" for page in reader.pages)
+        print(f"INFO: [Step 1/5] Document downloaded and text extracted in {time.time() - start_time:.2f} seconds.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process document: {e}")
 
     # 2. Chunk the Text
-    # Simple chunking by splitting text by double newlines.
+    print("INFO: [Step 2/5] Chunking text...")
     text_chunks = [p.strip() for p in full_document_text.split("\n\n") if p.strip()]
     if not text_chunks:
         raise HTTPException(status_code=500, detail="Could not extract text chunks from document.")
+    print(f"INFO: [Step 2/5] Text split into {len(text_chunks)} chunks.")
 
     # 3. Create Vector Index in Memory (using ChromaDB)
-    client = chromadb.Client()  # In-memory client by default
-    collection = client.create_collection(name="document_chunks")
-
-    # Generate embeddings and add to collection
+    print("INFO: [Step 3/5] Creating embeddings for chunks (this can be slow)...")
     chunk_embeddings = embedding_model.encode(text_chunks).tolist()
+    client = chromadb.Client()
+    collection = client.create_collection(name="document_chunks")
     collection.add(
         embeddings=chunk_embeddings,
         documents=text_chunks,
         ids=[f"chunk_{i}" for i in range(len(text_chunks))]
     )
+    print(f"INFO: [Step 3/5] Vector index created in {time.time() - start_time:.2f} seconds.")
 
     # 4. Process Each Question
     final_answers = []
-    for question in questions:
-        # Find relevant chunks for the current question
+    print("INFO: [Step 4/5] Starting to process questions...")
+    for i, question in enumerate(questions):
+        print(f"INFO: - Processing question {i+1}/{len(questions)}: '{question[:40]}...'")
         question_embedding = embedding_model.encode([question]).tolist()
         results = collection.query(
             query_embeddings=question_embedding,
-            n_results=3  # Get the top 3 most relevant chunks
+            n_results=3
         )
-
         relevant_context = "\n\n".join(results['documents'][0])
 
-        # 5. Generate Answer with LLM (Augmented Generation)
-        prompt = f"""Based only on the following context, please answer the question.
-Do not use any external knowledge. If the answer is not in the context, say "The answer is not found in the provided context."
+        # 5. Generate Answer with LLM
+        prompt = f"""Based only on the following context, please answer the question. Do not use any external knowledge. If the answer is not in the context, say "The answer is not found in the provided context."
 
 --- CONTEXT ---
 {relevant_context}
@@ -109,14 +115,16 @@ QUESTION: {question}
 
 ANSWER:
 """
-
+        print("INFO:   - Sending context to LLM...")
         try:
             response = llm.generate_content(prompt)
             final_answers.append(response.text.strip())
+            print(f"INFO:   - Received answer from LLM in {time.time() - start_time:.2f} seconds.")
         except Exception as e:
             print(f"LLM Error: {e}")
             final_answers.append("Error processing the question with the language model.")
-
+            
+    print(f"INFO: RAG process complete. Total time: {time.time() - start_time:.2f} seconds. Returning answers.")
     return final_answers
 
 
