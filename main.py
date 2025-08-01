@@ -29,6 +29,7 @@ except KeyError:
 # --- Load Models ---
 print("INFO: Loading embedding model (this may take a while)...")
 embedding_model = SentenceTransformer('TaylorAI/bge-micro-v2')
+embedding_model.half()
 print("INFO: Embedding model loaded successfully.")
 
 print("INFO: Loading LLM...")
