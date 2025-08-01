@@ -26,22 +26,24 @@ except KeyError:
     exit(1)
 
 
-# --- Load Models ---
+# --- Load Models and Clients at Startup ---
 print("INFO: Loading embedding model (this may take a while)...")
-embedding_model = SentenceTransformer('TaylorAI/bge-micro-v2')
-embedding_model.half()
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2') # Switched back to the better model
 print("INFO: Embedding model loaded successfully.")
 
 print("INFO: Loading LLM...")
 llm = genai.GenerativeModel('gemini-1.5-flash-latest')
 print("INFO: LLM loaded successfully.")
 
+# Create the ChromaDB client once at startup
+client = chromadb.Client()
+print("INFO: ChromaDB client created.")
+
 
 # --- Pydantic Models ---
 class HackathonRequest(BaseModel):
     documents: str
     questions: List[str]
-
 
 class HackathonResponse(BaseModel):
     answers: List[str]
@@ -70,7 +72,7 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
         with io.BytesIO(response.content) as pdf_file:
             reader = pypdf.PdfReader(pdf_file)
             full_document_text = "".join(page.extract_text() or "" for page in reader.pages)
-        print(f"INFO: [Step 1/5] Document downloaded and text extracted in {time.time() - start_time:.2f} seconds.")
+        print(f"INFO: [Step 1/5] Document downloaded in {time.time() - start_time:.2f} seconds.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process document: {e}")
 
@@ -82,10 +84,11 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
     print(f"INFO: [Step 2/5] Text split into {len(text_chunks)} chunks.")
 
     # 3. Create Vector Index in Memory (using ChromaDB)
-    print("INFO: [Step 3/5] Creating embeddings for chunks (this can be slow)...")
-    chunk_embeddings = embedding_model.encode(text_chunks).tolist()
-    client = chromadb.Client()
+    print("INFO: [Step 3/5] Resetting database and creating vector index...")
+    client.reset()  # <-- ADD THIS LINE to completely clear the database for a fresh start
     collection = client.create_collection(name="document_chunks")
+    
+    chunk_embeddings = embedding_model.encode(text_chunks).tolist()
     collection.add(
         embeddings=chunk_embeddings,
         documents=text_chunks,
@@ -101,8 +104,6 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
 
     for i, question in enumerate(questions):
         print(f"INFO: - Processing question {i+1}/{len(questions)}: '{question[:40]}...'")
-        
-        # Use the pre-calculated embedding for the current question
         question_embedding = [all_question_embeddings[i]]
         
         results = collection.query(
