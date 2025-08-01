@@ -5,6 +5,7 @@ import io
 import google.generativeai as genai
 import chromadb
 import time
+import uuid
 
 # Add a print statement right at the beginning
 print("INFO: Python script starting...")
@@ -29,7 +30,7 @@ except KeyError:
 # --- Load Models and Clients at Startup ---
 print("INFO: Loading embedding model (this may take a while)...")
 embedding_model = SentenceTransformer('paraphrase-albert-small-v2')
-embedding_model.half() 
+embedding_model.half()
 print("INFO: Embedding model loaded successfully.")
 
 print("INFO: Loading LLM...")
@@ -85,9 +86,11 @@ def answer_questions_from_document(document_url: str, questions: List[str]) -> L
     print(f"INFO: [Step 2/5] Text split into {len(text_chunks)} chunks.")
 
     # 3. Create Vector Index in Memory (using ChromaDB)
-    print("INFO: [Step 3/5] Resetting database and creating vector index...")
-    client.reset()  # <-- ADD THIS LINE to completely clear the database for a fresh start
-    collection = client.create_collection(name="document_chunks")
+    print("INFO: [Step 3/5] Creating vector index with a unique name...")
+    
+    # Generate a unique name for the collection for each request
+    collection_name = f"hackrx_collection_{uuid.uuid4().hex}"
+    collection = client.create_collection(name=collection_name)
     
     chunk_embeddings = embedding_model.encode(text_chunks).tolist()
     collection.add(
@@ -133,6 +136,8 @@ ANSWER:
             print(f"LLM Error: {e}")
             final_answers.append("Error processing the question with the language model.")
             
+    # Clean up the collection after the request is done
+    client.delete_collection(name=collection_name)
     print(f"INFO: RAG process complete. Total time: {time.time() - start_time:.2f} seconds. Returning answers.")
     return final_answers
 
