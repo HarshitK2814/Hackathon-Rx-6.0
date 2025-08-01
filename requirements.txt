@@ -4,3 +4,4 @@ pypdf
 requests
 scikit-learn
 numpy
+google-generativeai
