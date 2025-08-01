@@ -28,7 +28,7 @@ except KeyError:
 
 # --- Load Models and Clients at Startup ---
 print("INFO: Loading embedding model (this may take a while)...")
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+embedding_model = SentenceTransformer('paraphrase-albert-small-v2')
 embedding_model.half() 
 print("INFO: Embedding model loaded successfully.")
 
