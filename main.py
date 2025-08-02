@@ -11,16 +11,16 @@ from pydantic import BaseModel
 from typing import List
 
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
 print("INFO: Python script starting...")
 
 # ---- TUNABLE LIMITS ----
-MAX_PDF_SIZE = 2 * 1024 * 1024  # 2MB (for safety; you can adjust)
-MAX_PDF_PAGES = 12              # First 12 pages; adjust if needed
-CHUNK_SIZE = 1024               # Characters per chunk (fixed for speed)
-MAX_CHUNKS = 10                 # Up to 10 chunks per document
-MAX_QUESTIONS = 1               # Only 1 question per call
+MAX_PDF_SIZE = 2 * 1024 * 1024  # 2MB
+MAX_PDF_PAGES = 12             # First 12 pages
+CHUNK_SIZE = 1024              # Characters per chunk
+MAX_CHUNKS = 10                # Up to 10 chunks per document
 
 class HackathonRequest(BaseModel):
     documents: str
@@ -29,7 +29,7 @@ class HackathonRequest(BaseModel):
 class HackathonResponse(BaseModel):
     answers: List[str]
 
-app = FastAPI(title="Render Fast RAG (PyMuPDF + TF-IDF)")
+app = FastAPI(title="Optimized Fast RAG (PyMuPDF + TF-IDF)")
 
 def extract_text_from_pdf_url(pdf_url: str) -> str:
     t0 = time.time()
@@ -40,7 +40,6 @@ def extract_text_from_pdf_url(pdf_url: str) -> str:
             raise HTTPException(status_code=413, detail=f"PDF too large (> {MAX_PDF_SIZE//1024} KB)")
         with io.BytesIO(response.content) as pdf_file:
             doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-            # Read only up to MAX_PDF_PAGES
             texts = []
             for page in doc.pages(0, min(len(doc), MAX_PDF_PAGES)):
                 texts.append(page.get_text())
@@ -54,18 +53,6 @@ def chunk_text(text: str) -> List[str]:
     # Fixed-size chunking by chars for fast, even splitting
     chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     return chunks[:MAX_CHUNKS]
-
-def find_most_similar_chunk(chunks: List[str], question: str) -> str:
-    if not chunks:
-        return ""
-    all_text = chunks + [question]
-    vectorizer = TfidfVectorizer().fit(all_text)
-    tfidf_matrix = vectorizer.transform(all_text)
-    chunk_vecs = tfidf_matrix[:-1]
-    question_vec = tfidf_matrix[-1]
-    sims = (chunk_vecs * question_vec.T).toarray().flatten()
-    best_idx = int(np.argmax(sims))
-    return chunks[best_idx] if sims[best_idx] > 0.05 else ""
 
 def simple_qa(context: str, question: str) -> str:
     # Simple QA: pick the sentence in the context with most keyword overlap, else fallback
@@ -82,32 +69,44 @@ def simple_qa(context: str, question: str) -> str:
 
 @app.post("/hackrx/run", response_model=HackathonResponse)
 async def process_hackathon_request(request_body: HackathonRequest) -> HackathonResponse:
-    questions = request_body.questions
-    if len(questions) > MAX_QUESTIONS:
-        raise HTTPException(status_code=400, detail=f"Too many questions! Limit: {MAX_QUESTIONS} per request.")
-
     t0 = time.time()
+    questions = request_body.questions
+    
+    # Step 1 & 2: Extract text and chunk it
     full_text = extract_text_from_pdf_url(request_body.documents)
     chunks = chunk_text(full_text)
+    
     if not chunks:
         raise HTTPException(status_code=500, detail="No text extracted from PDF.")
 
+    # Step 3: Vectorize all chunks and questions together (much faster)
+    vectorizer = TfidfVectorizer().fit(chunks + questions)
+    chunk_vecs = vectorizer.transform(chunks)
+    question_vecs = vectorizer.transform(questions)
+
+    # Step 4: Calculate all similarities at once using matrix multiplication
+    similarity_matrix = cosine_similarity(question_vecs, chunk_vecs)
+
     answers = []
-    for question in questions:
-        context = find_most_similar_chunk(chunks, question)
-        if not context:
+    for i in range(len(questions)):
+        # Find the best chunk for the current question from the similarity matrix
+        best_chunk_index = np.argmax(similarity_matrix[i])
+        
+        # Check if the similarity score is above a certain threshold
+        if similarity_matrix[i][best_chunk_index] > 0.05:
+            context = chunks[best_chunk_index]
+            answer = simple_qa(context, questions[i])
+            answers.append(answer)
+        else:
             answers.append("The answer is not found in the provided context.")
-            continue
-        answer = simple_qa(context, question)
-        answers.append(answer)
 
     # Free memory right after processing
-    del full_text, chunks
+    del full_text, chunks, vectorizer, chunk_vecs, question_vecs, similarity_matrix
     gc.collect()
 
-    print(f"Total RAG time: {time.time()-t0:.2f}s")
+    print(f"Total processing time for {len(questions)} questions: {time.time()-t0:.2f}s")
     return HackathonResponse(answers=answers)
 
 @app.get("/")
 def root():
-    return {"status": "Render Fast RAG API is running!"}
+    return {"status": "Optimized Fast RAG API is running!"}
