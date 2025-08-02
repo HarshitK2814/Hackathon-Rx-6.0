@@ -35,7 +35,7 @@ print("INFO: LLM loaded successfully.")
 MAX_PDF_SIZE = 2 * 1024 * 1024      # 2MB
 MAX_PDF_PAGES = 16                 # First 16 pages ONLY
 CHUNK_SIZE = 1024                  # Characters per chunk
-MAX_CHUNKS = 8                     # Max 8 chunks to keep TF-IDF fast
+MAX_CHUNKS = 12                    # Max 12 chunks to keep TF-IDF fast
 
 class HackathonRequest(BaseModel):
     documents: str
@@ -109,10 +109,22 @@ async def process_hackathon_request(request_body: HackathonRequest) -> Hackathon
 
     answers = []
     for i in range(len(questions)):
-        best_chunk_index = np.argmax(similarity_matrix[i])
+        # Get similarity scores for the current question
+        scores = similarity_matrix[i]
         
-        if similarity_matrix[i][best_chunk_index] > 0.05:
-            context = chunks[best_chunk_index]
+        # Get the indices of the top 2 chunks, sorted from best to worst
+        top_k_indices = np.argsort(scores)[-2:][::-1]
+        
+        # Combine the top chunks into a single context
+        context_parts = []
+        for index in top_k_indices:
+            # Only include chunks that have some relevance
+            if scores[index] > 0.05:
+                context_parts.append(chunks[index])
+        
+        if context_parts:
+            # Join the relevant chunks with a separator to give the LLM more info
+            context = "\n\n---\n\n".join(context_parts)
             answer = generate_answer_with_llm(context, questions[i])
             answers.append(answer)
         else:
