@@ -4,6 +4,7 @@ import io
 import time
 import gc
 import google.generativeai as genai
+import fitz  # PyMuPDF
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
