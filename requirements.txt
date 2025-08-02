@@ -2,7 +2,6 @@ fastapi
 uvicorn
 requests
 PyMuPDF
-pypdf
 scikit-learn
 numpy
-pydantic
+google-generativeai
