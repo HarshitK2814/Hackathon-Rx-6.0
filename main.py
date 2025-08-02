@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from typing import List
 
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 
 print("INFO: Python script starting...")
@@ -30,14 +31,14 @@ llm = genai.GenerativeModel('gemini-1.5-flash-latest')
 print("INFO: LLM loaded successfully.")
 
 
-# Limits for free-tier
+# ---- AGGRESSIVE LIMITS FOR FREE TIER ----
 MAX_PDF_SIZE = 2 * 1024 * 1024      # 2MB
-MAX_PDF_PAGES = 12                 # First 12 pages only
+MAX_PDF_PAGES = 16                 # First 16 pages ONLY
 CHUNK_SIZE = 1024                  # Characters per chunk
-MAX_CHUNKS = 10                    # Up to 10 chunks per document
+MAX_CHUNKS = 8                     # Max 8 chunks to keep TF-IDF fast
 
 class HackathonRequest(BaseModel):
-    documents: str    # URL to PDF
+    documents: str
     questions: List[str]
 
 class HackathonResponse(BaseModel):
@@ -64,18 +65,6 @@ def extract_text_from_pdf_url(pdf_url: str) -> str:
 def chunk_text(text: str) -> List[str]:
     chunks = [text[i:i+CHUNK_SIZE] for i in range(0, len(text), CHUNK_SIZE)]
     return chunks[:MAX_CHUNKS]
-
-def find_most_similar_chunk(chunks: List[str], question: str) -> str:
-    if not chunks:
-        return ""
-    all_text = chunks + [question]
-    vectorizer = TfidfVectorizer().fit(all_text)
-    tfidf_matrix = vectorizer.transform(all_text)
-    chunk_vecs = tfidf_matrix[:-1]
-    question_vec = tfidf_matrix[-1]
-    sims = (chunk_vecs * question_vec.T).toarray().flatten()
-    best_idx = int(np.argmax(sims))
-    return chunks[best_idx] if sims[best_idx] > 0.05 else ""
 
 def generate_answer_with_llm(context: str, question: str) -> str:
     """
@@ -110,18 +99,26 @@ async def process_hackathon_request(request_body: HackathonRequest) -> Hackathon
     if not chunks:
         return HackathonResponse(answers=["No text could be extracted from the document."] * len(questions))
 
-    answers = []
-    for question in questions:
-        context = find_most_similar_chunk(chunks, question)
-        if not context:
-            answers.append("No relevant context was found in the document for this question.")
-            continue
-        
-        # Use the AI to generate the final answer
-        answer = generate_answer_with_llm(context, question)
-        answers.append(answer)
+    # Vectorize all chunks and questions together for speed
+    vectorizer = TfidfVectorizer().fit(chunks + questions)
+    chunk_vecs = vectorizer.transform(chunks)
+    question_vecs = vectorizer.transform(questions)
 
-    del full_text, chunks
+    # Calculate all similarities at once
+    similarity_matrix = cosine_similarity(question_vecs, chunk_vecs)
+
+    answers = []
+    for i in range(len(questions)):
+        best_chunk_index = np.argmax(similarity_matrix[i])
+        
+        if similarity_matrix[i][best_chunk_index] > 0.05:
+            context = chunks[best_chunk_index]
+            answer = generate_answer_with_llm(context, questions[i])
+            answers.append(answer)
+        else:
+            answers.append("No relevant context was found in the document for this question.")
+
+    del full_text, chunks, vectorizer, chunk_vecs, question_vecs, similarity_matrix
     gc.collect()
 
     print(f"Total processing time for {len(questions)} questions: {time.time()-t0:.2f}s")
